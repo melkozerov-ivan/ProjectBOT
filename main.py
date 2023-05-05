@@ -1,81 +1,117 @@
 import logging
-import datetime
+
+from random import choice, choices
+
+from aiogram import Bot, Dispatcher, types
 
 from telegram.ext import Application, MessageHandler, filters, CommandHandler, ConversationHandler
+
 from telegram import ReplyKeyboardMarkup
-from config import BOT_TOKEN
+
+import config
+
+import sqlalchemy as sa
+
+from data import db_session
+
+from data.Players import Player
+
+bot = Bot(token=config.BOT_TOKEN)
+
+dp = Dispatcher(bot)
 
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.DEBUG
 )
 
 logger = logging.getLogger(__name__)
 
 
-async def echo(update, context):
-    q = f'Я получил сообщение "{update.message.text}"'
-    await update.message.reply_text(q)
-    return 2
+def users():
+    db_sess = db_session.create_session()
+    return db_sess.execute(sa.select(Player.login)).scalars().all()
 
 
-async def eeecho(update, context):
-    q = f'{update.message.text}'
-    await update.message.reply_text(q.upper() + ' ' + q.lower() + '...')
-    return ConversationHandler.END
+def variants(integ):
+    db_sess = db_session.create_session()
+    q = choices(config.WEAPONS, 2 * integ)
+    h = []
+    for i in range(1, integ + 1):
+        player = db_sess.query(Player).filter(Player.id == i).first()
+        if player:
+            player.weap = [q[2 * i - 2], q[2 * i - 1]]
+            db_sess.commit()
+    for i in range(1, integ + 1):
+        user = db_sess.execute(sa.select(Player).where(Player.id == i)).scalars().first()
+        h.append(user)
+    return h
+
+
+def killerwep(kil):
+    db_sess = db_session.create_session()
+    wep = db_sess.execute(sa.select(Player.weap).where(Player.id == kil)).scalars().first()
+    return wep
+
+
+def not_answered(login):
+    db_sess = db_session.create_session()
+    ans = db_sess.execute(sa.select(Player.ans).where(Player.id == login)).scalars().first()
+    return ans
+
+
+@dp.message_handler()
+async def del_wep(message: types.Message):
+    text = message.text
+    if 'weap' in text:
+        await message.delete()
+
+
+@dp.message_handler(content_types=['new_chat_member'])
+async def ad_to_db(message: types.Message):
+    db_sess = db_session.create_session()
+    user = Player(
+        login=message.from_user.id
+    )
+    db_sess.add(user)
+    db_sess.commit()
 
 
 async def start(update, context):
-    user = update.effective_user
-    await update.message.reply_html(
-        rf"Привет {user.mention_html()}! Я эхо-бот. Напишите мне что-нибудь, и я пришлю это назад!")
+    q = users()
+    config.KILLER = choice(q)
+    config.ALL_ANSWERS = len(q)
+    await update.message.reply_text(f"Киллер - выбирайте орудие. Напишите weap, а затем название оружия.")
+    await update.message.reply_text(variants(len(q)))
     return 1
 
 
-def remove_job_if_exists(name, context):
-    current_jobs = context.job_queue.get_jobs_by_name(name)
-    if not current_jobs:
-        return False
-    for job in current_jobs:
-        job.schedule_removal()
-    return True
+async def register(update, context):
+    q = f'Игра началась. Вычислите преступника и орудие убийства. Можно начинать обсуждение'
+    weap = update.message.text
+    if weap in killerwep(config.KILLER):
+        config.KILLERWEP = weap
+        await update.message.reply_text(q)
+    else:
+        await update.message.reply_text('Этого оружия нет в арсенале')
 
 
-TIMER = 0
+async def answer(update, context):
+    q = f'Введите предпологаемое имя Убийцы и его оружие через пробел'
+    await update.message.reply_text(q)
+    return 3
 
 
-async def set_timer(update, context):
-    global TIMER
-    TIMER = int(f'{update.message.text}'.replace('/timer ', ''))
-    print(TIMER)
-    chat_id = update.effective_message.chat_id
-    job_removed = remove_job_if_exists(str(chat_id), context)
-    context.job_queue.run_once(task, TIMER, chat_id=chat_id, name=str(chat_id), data=TIMER)
-
-    text = f'Вернусь через {TIMER} с.!'
-    if job_removed:
-        text += ' Старая задача удалена.'
-    await update.effective_message.reply_text(text)
-
-
-async def task(context):
-    await context.bot.send_message(context.job.chat_id, text=f'КУКУ! {TIMER}c. прошли!')
-
-
-async def unset(update, context):
-    chat_id = update.message.chat_id
-    job_removed = remove_job_if_exists(str(chat_id), context)
-    text = 'Таймер отменен!' if job_removed else 'У вас нет активных таймеров'
-    await update.message.reply_text(text)
-
-
-async def fdate(update, context):
-    q = datetime.datetime.now()
-    await update.message.reply_html(str(q).split()[0], reply_markup=markup) + f'{update.message.text}'
-
-
-async def ftime(update, context):
-    q = datetime.datetime.now()
-    await update.message.reply_html(str(q).split()[1].split('.')[0], reply_markup=markup)
+async def check_answer(update, context):
+    q = str(update.message.text).split()
+    if not_answered(update.effective_user):
+        if config.KILLERWEP == q[1] and config.KILLER == q[0]:
+            await update.message.reply_text('Верно, победили инспектора')
+            return ConversationHandler.END
+        else:
+            await update.message.reply_text("Обвинение ложно!")
+            config.ALL_ANSWERS -= 1
+            if config.ALL_ANSWERS == 0:
+                return ConversationHandler.END
 
 
 async def help_command(update, context):
@@ -83,7 +119,7 @@ async def help_command(update, context):
                                     reply_markup=markup)
 
 
-async def stop(update, context):
+async def stop(update, context):  # Для киллера
     await update.message.reply_text("Тишина...", reply_markup=markup)
     return ConversationHandler.END
 
@@ -92,26 +128,23 @@ markup = ReplyKeyboardMarkup([['/help', '/start'], ['/date', '/time'], ['/timer'
 
 
 def main():
-    application = Application.builder().token(BOT_TOKEN).build()
+    application = Application.builder().token(config.BOT_TOKEN).build()
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
         states={
-            1: [MessageHandler(filters.TEXT & ~filters.COMMAND, echo)],
-
-            2: [MessageHandler(filters.TEXT & ~filters.COMMAND, eeecho)]
+            1: [MessageHandler(filters.TEXT & ~filters.COMMAND, register)],
+            3: [MessageHandler(filters.TEXT & ~filters.COMMAND, check_answer)]
         },
         fallbacks=[CommandHandler('stop', stop)]
     )
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("date", fdate))
-    application.add_handler(CommandHandler("time", ftime))
-    application.add_handler(CommandHandler("timer", set_timer))
-    application.add_handler(CommandHandler("unset", unset))
-
+    application.add_handler(CommandHandler("answer", answer))
     application.run_polling()
 
 
 if __name__ == '__main__':
     main()
+
+

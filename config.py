@@ -1,1 +1,11 @@
-BOT_TOKEN = '6096959906:AAHE_OXWkg4w6o-56CbLvGfUBaUXN0tcH-0'
+# BOT_TOKEN = '6096959906:AAHE_OXWkg4w6o-56CbLvGfUBaUXN0tcH-0'
+BOT_TOKEN = '6023238869:AAEcz_4AErD6DFwAP_bPNlWwVaF2ZSel6f0'
+
+# CHAT_ID = ''
+# ADMIN_ID = ''
+WEAPONS = ['дубина', 'лопата', 'нож', 'подсвечник', 'яд', 'веревка', 'бензопила', 'огонь', 'газ', 'инфекция',
+           'электричество', 'стекло', 'кирпич', 'арматура', 'камень', 'ножницы', 'гаечный_ключ', 'скальпель',
+           'лекарство', 'ртуть']
+KILLER = ''
+KILLERWEP = ''
+ALL_ANSWERS = 0
